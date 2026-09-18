@@ -233,6 +233,24 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .ok { color: #7ddea0; margin-top: .75rem; }
 .mono { font-family: "IBM Plex Mono", monospace; }
 
+.err.conflict {
+  border: 1px solid rgba(232, 93, 76, .55);
+  background: rgba(232, 93, 76, .10);
+  border-radius: 6px;
+  padding: .7rem .85rem;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.err.conflict strong { color: #ff7a66; }
+.err.network {
+  border: 1px solid rgba(154, 138, 122, .45);
+  background: rgba(154, 138, 122, .10);
+  border-radius: 6px;
+  padding: .6rem .85rem;
+  color: #d8c8b8;
+}
+.conflict-meta { font-size: .78rem; opacity: .85; }
+.conflict-hint { font-size: .78rem; color: #e8c46a; }
+
 .screen {
   text-align: center;
   margin: 0 auto .85rem;

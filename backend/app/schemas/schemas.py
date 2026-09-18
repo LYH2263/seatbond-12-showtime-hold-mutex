@@ -43,6 +43,12 @@ class ConflictOut(BaseModel):
     showtime_id: int
     party_size: int
     reason: str
+    request_code: str | None = None
+    requested_row: int | None = None
+    requested_start_col: int | None = None
+    requested_end_col: int | None = None
+    blocking_order_code: str | None = None
+    film_title: str | None = None
     created_at: datetime
     model_config = {"from_attributes": True}
 

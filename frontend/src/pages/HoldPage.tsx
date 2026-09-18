@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 
 type Show = { id: number; film_title: string; hall_name?: string };
 type Hold = {
@@ -17,7 +17,7 @@ export default function HoldPage() {
   const [party, setParty] = useState(3);
   const [prefRow, setPrefRow] = useState("");
   const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState<ApiError | null>(null);
   const [last, setLast] = useState<Hold | null>(null);
 
   useEffect(() => {
@@ -29,17 +29,21 @@ export default function HoldPage() {
 
   async function submit() {
     setMsg("");
-    setErr("");
+    setErr(null);
     try {
       const body: Record<string, unknown> = { showtime_id: sid, party_size: party };
       if (prefRow) body.preferred_row = Number(prefRow);
       const hold = await api<Hold>("/holds", { method: "POST", body: JSON.stringify(body) });
       setLast(hold);
-      setMsg(`已锁座 ${hold.order_code}：第${hold.row}排 ${hold.start_col}-${hold.end_col}`);
+      setMsg(`已锁座 ${hold.order_code}：第${hold.row}排 ${hold.start_col}-${hold.end_col}（${hold.party_size} 人）`);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(e instanceof ApiError ? e : new ApiError(0, String(e), null));
     }
   }
+
+  const reqText = err?.requested
+    ? `第${err.requested.row}排 ${err.requested.start_col}-${err.requested.end_col} 座`
+    : "";
 
   return (
     <>
@@ -75,7 +79,27 @@ export default function HoldPage() {
         <button onClick={submit}>查找并锁连座</button>
       </div>
       {msg && <div className="ok">{msg}</div>}
-      {err && <div className="err">{err}</div>}
+      {err && (
+        <div className={err.isConflict ? "err conflict" : "err network"}>
+          {err.isConflict ? (
+            <>
+              <strong>座位冲突，锁座失败</strong>
+              <div>{err.message}</div>
+              <div className="mono conflict-meta">
+                被拒请求 {err.requestCode} · 场次 #{err.showtimeId} · {err.partySize} 人
+                {reqText ? ` · 申请 ${reqText}` : ""}
+                {err.blockingOrderCode ? ` · 已被 ${err.blockingOrderCode} 占用` : ""}
+              </div>
+              <div className="conflict-hint">这不是网络问题，座位仍在：可稍后重试或改选其他座位。</div>
+            </>
+          ) : (
+            <>
+              <strong>请求失败</strong>
+              <div>{err.message}</div>
+            </>
+          )}
+        </div>
+      )}
       {last && (
         <p className="mono">
           订单 {last.order_code} · {last.party_size} 人 · R{last.row} C{last.start_col}-{last.end_col}

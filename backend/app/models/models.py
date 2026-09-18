@@ -47,4 +47,12 @@ class ConflictLog(Base):
     showtime_id: Mapped[int] = mapped_column(ForeignKey("showtimes.id"))
     party_size: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(200))
+    # 被拒绝的那笔请求的标识（即使没落持座也能在冲突页追溯）
+    request_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # 该请求算出、却被拒绝的占用区间（含部分重叠时记录其坐标）
+    requested_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requested_start_col: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requested_end_col: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 抢占成功、挡住该请求的持座订单号
+    blocking_order_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
