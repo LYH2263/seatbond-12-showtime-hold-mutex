@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,13 +13,7 @@ from app.schemas.schemas import (
     SeatMapOut,
     ShowtimeOut,
 )
-from app.services.bond_engine import (
-    HoldSpan,
-    SeatCell,
-    conflicts_with,
-    find_bond_across_rows,
-    find_contiguous_block,
-)
+from app.services.hold_service import SeatUnavailable, ShowtimeNotFound, place_hold
 
 api_router = APIRouter()
 
@@ -78,7 +70,6 @@ def seatmap(showtime_id: int, db: Session = Depends(get_db)):
         for c in range(h.start_col, h.end_col + 1):
             occupied.add((h.row, c))
     cells: list[SeatMapCell] = []
-    total = hall.rows * hall.cols
     for r in range(1, hall.rows + 1):
         for c in range(1, hall.cols + 1):
             occ = (r, c) in occupied
@@ -107,65 +98,49 @@ def list_holds(db: Session = Depends(get_db)):
 
 @api_router.get("/conflicts", response_model=list[ConflictOut])
 def list_conflicts(db: Session = Depends(get_db)):
-    return db.scalars(select(ConflictLog).order_by(ConflictLog.id.desc())).all()
+    logs = db.scalars(select(ConflictLog).order_by(ConflictLog.id.desc())).all()
+    show_cache: dict[int, Showtime] = {}
+    hall_cache: dict[int, Hall] = {}
+    out: list[ConflictOut] = []
+    for log in logs:
+        st = show_cache.get(log.showtime_id) or db.get(Showtime, log.showtime_id)
+        hall_name = None
+        if st:
+            show_cache[st.id] = st
+            hall = hall_cache.get(st.hall_id) or db.get(Hall, st.hall_id)
+            if hall:
+                hall_cache[hall.id] = hall
+                hall_name = hall.name
+        out.append(
+            ConflictOut(
+                id=log.id,
+                showtime_id=log.showtime_id,
+                film_title=st.film_title if st else None,
+                hall_name=hall_name,
+                party_size=log.party_size,
+                kind=log.kind,
+                row=log.row,
+                start_col=log.start_col,
+                end_col=log.end_col,
+                reason=log.reason,
+                created_at=log.created_at,
+            )
+        )
+    return out
 
 
-@api_router.post("/holds", response_model=HoldOut)
+@api_router.post("/holds", response_model=HoldOut, status_code=201)
 def create_hold(body: HoldRequest, db: Session = Depends(get_db)):
-    st = db.get(Showtime, body.showtime_id)
-    if not st:
+    try:
+        hold = place_hold(
+            db,
+            showtime_id=body.showtime_id,
+            party_size=body.party_size,
+            preferred_row=body.preferred_row,
+        )
+    except ShowtimeNotFound:
         raise HTTPException(404, "场次不存在")
-    hall = db.get(Hall, st.hall_id)
-    assert hall
-    aisles = set(_aisles(hall))
-    existing = db.scalars(select(SeatHold).where(SeatHold.showtime_id == body.showtime_id)).all()
-    holds = [HoldSpan(row=h.row, start_col=h.start_col, end_col=h.end_col) for h in existing]
-    seats_by_row: dict[int, list[SeatCell]] = {}
-    for r in range(1, hall.rows + 1):
-        seats_by_row[r] = [
-            SeatCell(row=r, col=c, is_aisle=c in aisles) for c in range(1, hall.cols + 1)
-        ]
-
-    block = None
-    if body.preferred_row:
-        block = find_contiguous_block(
-            seats_by_row.get(body.preferred_row, []), holds, body.preferred_row, body.party_size
-        )
-    if block is None:
-        block = find_bond_across_rows(seats_by_row, holds, body.party_size)
-    if block is None:
-        db.add(
-            ConflictLog(
-                showtime_id=body.showtime_id,
-                party_size=body.party_size,
-                reason=f"无足够连续空座（人数 {body.party_size}）",
-            )
-        )
-        db.commit()
-        raise HTTPException(409, "无足够连续空座")
-
-    hits = conflicts_with(holds, block)
-    if hits:
-        db.add(
-            ConflictLog(
-                showtime_id=body.showtime_id,
-                party_size=body.party_size,
-                reason=f"与既有持座重叠：第{hits[0].row}排 {hits[0].start_col}-{hits[0].end_col}",
-            )
-        )
-        db.commit()
-        raise HTTPException(409, "与既有持座冲突")
-
-    code = f"SB-{int(datetime.utcnow().timestamp()) % 100000:05d}"
-    hold = SeatHold(
-        showtime_id=body.showtime_id,
-        order_code=code,
-        row=block.row,
-        start_col=block.start_col,
-        end_col=block.end_col,
-        party_size=body.party_size,
-    )
-    db.add(hold)
-    db.commit()
-    db.refresh(hold)
+    except SeatUnavailable as rejected:
+        # 409 with a structured body: UI distinguishes conflict from network errors.
+        raise HTTPException(status_code=409, detail=rejected.detail)
     return hold

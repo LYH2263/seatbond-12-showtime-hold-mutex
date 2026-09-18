@@ -41,7 +41,13 @@ class HoldRequest(BaseModel):
 class ConflictOut(BaseModel):
     id: int
     showtime_id: int
+    film_title: str | None = None
+    hall_name: str | None = None
     party_size: int
+    kind: str
+    row: int | None = None
+    start_col: int | None = None
+    end_col: int | None = None
     reason: str
     created_at: datetime
     model_config = {"from_attributes": True}
